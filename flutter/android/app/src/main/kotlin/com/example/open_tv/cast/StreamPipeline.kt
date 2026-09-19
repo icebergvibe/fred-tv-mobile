@@ -13,6 +13,13 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.URI
+import java.net.URL
 import java.util.ArrayDeque
 
 /**
@@ -82,6 +89,8 @@ class StreamPipeline(private val workDir: File) {
         private const val READY_POLL_MS = 300L
         private const val READY_TIMEOUT_MS = 45_000L
         private const val STOP_TIMEOUT_MS = 5_000L
+        private const val PROBE_TIMEOUT_MS = 4_000
+        private const val PROBE_BODY_BYTES = 300
         const val STUCK_MESSAGE =
             "FFmpeg did not stop; force-stop the app to free the stream connection"
         private const val LOG_TAIL = 200
@@ -90,6 +99,7 @@ class StreamPipeline(private val workDir: File) {
         private const val MAX_RECONNECTS = 5
         private val STREAM_LINE = Regex("""Stream #0:\d+.*?: (Video|Audio): ([A-Za-z0-9_]+)""")
         private val DURATION_LINE = Regex("""Duration: (\d+):(\d+):(\d+)\.(\d+)""")
+        private val HTTP_STATUS_ERROR = Regex("""HTTP error \d{3}|Server returned \d{3}""")
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -159,6 +169,7 @@ class StreamPipeline(private val workDir: File) {
     suspend fun stop(): Boolean = withContext(NonCancellable) {
         val running = session
         if (running == null) {
+            stopping = true // a probe in flight must not schedule a relaunch
             cancelPending()
             clearWorkDir()
             state = State.Stopped
@@ -356,9 +367,81 @@ class StreamPipeline(private val workDir: File) {
                 appendLog("!! hardware encoder failed, falling back to software")
                 launch(Mode.TRANSCODE_SW)
             }
-            else -> scheduleReconnect(lastError())
+            else -> {
+                val reason = lastError()
+                if (attempt == 0 && HTTP_STATUS_ERROR.containsMatchIn(reason)) {
+                    probeThenReconnect(gen, reason)
+                } else {
+                    scheduleReconnect(reason)
+                }
+            }
         }
     }
+
+    // -------------------------------------------------------------- probe
+
+    /**
+     * FFmpeg and ExoPlayer reach the provider differently: raw sockets versus
+     * the platform HTTP stack, which honours the network's proxy and sends
+     * the platform user agent. When FFmpeg's first attempt is refused with an
+     * HTTP status, ask once through the platform stack - after FFmpeg has
+     * exited, never alongside it - and log who answered, so a refusal caused
+     * by this device's network path can be told apart from the provider's.
+     */
+    private fun probeThenReconnect(gen: Int, reason: String) {
+        val req = request ?: return
+        Thread({
+            val line = httpProbe(req)
+            handler.post {
+                appendLog(line)
+                if (stopping || gen != generation || session != null) return@post
+                scheduleReconnect(reason)
+            }
+        }, "cast-http-probe").start()
+    }
+
+    private fun httpProbe(req: Request): String = try {
+        val conn = URL(req.url).openConnection() as HttpURLConnection
+        conn.connectTimeout = PROBE_TIMEOUT_MS
+        conn.readTimeout = PROBE_TIMEOUT_MS
+        req.userAgent?.takeIf { it.isNotBlank() }?.let { conn.setRequestProperty("User-Agent", it) }
+        req.referer?.takeIf { it.isNotBlank() }?.let { conn.setRequestProperty("Referer", it) }
+        req.origin?.takeIf { it.isNotBlank() }?.let { conn.setRequestProperty("Origin", it) }
+        try {
+            val code = conn.responseCode
+            val server = conn.getHeaderField("Server") ?: "?"
+            val type = conn.contentType ?: "?"
+            val body = if (code >= 400) conn.errorStream?.use { readSnippet(it) } else null
+            "!! platform HTTP stack: $code ${conn.responseMessage ?: ""} (server: $server, type: $type)" +
+                (body?.takeIf { it.isNotBlank() }?.let { " body: $it" } ?: "")
+        } finally {
+            conn.disconnect()
+        }
+    } catch (e: Exception) {
+        "!! platform HTTP stack: ${e.javaClass.simpleName}: ${e.message}"
+    }
+
+    private fun readSnippet(s: InputStream): String {
+        val buf = ByteArray(PROBE_BODY_BYTES)
+        var n = 0
+        while (n < buf.size) {
+            val r = s.read(buf, n, buf.size - n)
+            if (r < 0) break
+            n += r
+        }
+        return String(buf, 0, n).replace(Regex("\\s+"), " ").trim()
+    }
+
+    /**
+     * The proxy the platform HTTP stack would use for this URL (Wi-Fi proxy
+     * or PAC); FFmpeg does not look it up by itself.
+     */
+    private fun systemProxy(url: String): String? = runCatching {
+        ProxySelector.getDefault()?.select(URI(url))
+            ?.firstOrNull { it.type() == Proxy.Type.HTTP }
+            ?.let { it.address() as? InetSocketAddress }
+            ?.let { "http://${it.hostString}:${it.port}" }
+    }.getOrNull()
 
     private fun scheduleReconnect(reason: String) {
         if (attempt >= MAX_RECONNECTS) {
@@ -432,6 +515,7 @@ class StreamPipeline(private val workDir: File) {
                 req.origin?.takeIf { it.isNotBlank() }?.let { append("Origin: $it\r\n") }
             }
             if (headers.isNotEmpty()) args += listOf("-headers", headers)
+            systemProxy(req.url)?.let { args += listOf("-http_proxy", it) }
             args += listOf(
                 "-reconnect", "1", "-reconnect_streamed", "1",
                 "-reconnect_on_network_error", "1", "-reconnect_delay_max", "3",

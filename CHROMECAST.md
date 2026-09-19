@@ -1,4 +1,4 @@
-# Chromecast support (Android) — design notes
+# Chromecast support (Android) - design notes
 
 Work in progress on the `chromecast` branch. Android only; the media_kit
 players on other platforms are untouched.
@@ -20,10 +20,10 @@ players on other platforms are untouched.
 
 ## Architecture
 
-- `cast/CastOptionsProvider.kt` — Cast SDK options (Default Media Receiver).
-- `cast/CastManager.kt` — app-scoped: discovery (MediaRouter), session
+- `cast/CastOptionsProvider.kt` - Cast SDK options (Default Media Receiver).
+- `cast/CastManager.kt` - app-scoped: discovery (MediaRouter), session
   (SessionManager), remote media (RemoteMediaClient). Main thread only.
-- `cast/CastBridge.kt` ⇄ `lib/cast/cast_bridge.dart` — MethodChannel
+- `cast/CastBridge.kt` ⇄ `lib/cast/cast_bridge.dart` - MethodChannel
   `dev.fredol.open_tv/cast` + EventChannel `.../cast_events` (events are maps
   with a `type` of `routes | session | media | error`).
 - Flutter UI: `cast_button.dart` (toolbar icon), `cast_device_dialog.dart`
@@ -39,22 +39,22 @@ Jetpack Compose and hides live-stream flags on `MediaInfo`.
 
 ## Phases
 
-- [x] 0 — toolchain + baseline build
-- [x] 1 — session, device picker, controls, mini controller, test video
-- [x] 2 — local HTTP server (NanoHTTPD, `LocalStreamServer`) with CORS +
+- [x] 0 - toolchain + baseline build
+- [x] 1 - session, device picker, controls, mini controller, test video
+- [x] 2 - local HTTP server (NanoHTTPD, `LocalStreamServer`) with CORS +
       random token path; `CastService` foreground service (Wi-Fi + wake lock);
       `castStream` releases the local player, stops the old pipeline, then
       starts the new one (one upstream connection, enforced by `pipelineMutex`)
-- [x] 3 — FFmpeg remux (`-c copy` → HLS). Verified on Waydroid: H.264/AAC TS
+- [x] 3 - FFmpeg remux (`-c copy` → HLS). Verified on Waydroid: H.264/AAC TS
       in -> valid 2s HLS segments out.
-- [x] 4 — auto mode: `StreamPipeline` starts in REMUX, reads codecs from the
+- [x] 4 - auto mode: `StreamPipeline` starts in REMUX, reads codecs from the
       FFmpeg input dump (no extra probe connection), and restarts in
       TRANSCODE_HW (h264_mediacodec) then TRANSCODE_SW (libx264) if the
       receiver can't play them. Verified on Waydroid: MPEG-2/MP2 -> H.264 High/
       AAC-LC (software path; HW path needs real hardware). Audio-only transcode
       when video is already H.264. Pipeline status + FFmpeg log surfaced to the
       cast controls screen.
-- [ ] 5 — remaining: user settings (mode/quality/HW toggle); VOD seek beyond
+- [ ] 5 - remaining: user settings (mode/quality/HW toggle); VOD seek beyond
       the live window via `-ss` restart; codec caching per channel; measure
       real-device transcode speed & tune; audio-track switching.
 
@@ -69,7 +69,7 @@ clash with Flutter's copy.
 ## Diagnosing playback without adb
 
 The local ExoPlayer shows its last load/playback error on screen while it is
-buffering or reconnecting ("HTTP 403 — retrying (4)", "Connection refused",
+buffering or reconnecting ("HTTP 403 - retrying (4)", "Connection refused",
 …). Loads that fail are retried internally up to 999 times without reaching
 `onPlayerError`, so without this the only symptom of a refused stream is an
 endless spinner. If a channel spins forever in the fork but plays in the store
@@ -80,6 +80,15 @@ per-session cancel and a global one; `CastManager` then refuses to start
 another pipeline (that would be a second upstream connection) and reports
 "FFmpeg did not stop; force-stop the app…". Mid-run restarts (remux →
 transcode, ready timeout) get the same watchdog.
+
+FFmpeg's request is made to look like ExoPlayer's: the platform user agent
+(`http.agent`) when the channel has none of its own, and the network's proxy
+or PAC (`-http_proxy`), which FFmpeg's raw sockets would otherwise bypass.
+When FFmpeg's first attempt is refused with an HTTP status, the pipeline asks
+the same URL once through the platform HTTP stack - after FFmpeg has exited,
+never alongside it - and adds a "platform HTTP stack: ..." line (status,
+Server header, body snippet) to the stream log, so a refusal caused by the
+device's network path can be told apart from the provider's answer.
 
 ## Debugging the pipeline without a Chromecast (debug builds)
 

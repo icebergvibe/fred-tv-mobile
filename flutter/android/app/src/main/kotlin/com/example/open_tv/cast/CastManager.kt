@@ -352,8 +352,13 @@ object CastManager {
         }
     }
 
-    /** Same shape as ExoPlayer's default UA so the provider sees one client. */
+    /**
+     * What ExoPlayer sends when the channel has no user agent of its own
+     * (DefaultHttpDataSource leaves the header to the platform), so the
+     * provider sees one and the same client whether we play or cast.
+     */
     private fun defaultUserAgent(ctx: Context): String {
+        System.getProperty("http.agent")?.takeIf { it.isNotBlank() }?.let { return it }
         val version = runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
         }.getOrNull() ?: "?"

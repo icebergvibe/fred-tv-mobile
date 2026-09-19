@@ -185,7 +185,7 @@ class ExoPlayerView(
                 if (debug) Log.e(DIAG_TAG, "onPlayerError code=${error.errorCodeName} cause=${error.cause}", error)
                 val what = describe(error.cause ?: error)
                 showStatus(
-                    if (isLive) "$what (${error.errorCodeName}) — reconnecting…"
+                    if (isLive) "$what (${error.errorCodeName}) - reconnecting…"
                     else "$what (${error.errorCodeName})"
                 )
                 if (isLive) scheduleReconnect()
@@ -221,7 +221,7 @@ class ExoPlayerView(
             ) {
                 if (wasCanceled) return
                 loadErrors++
-                showStatus("${describe(error)} — retrying ($loadErrors)")
+                showStatus("${describe(error)} - retrying ($loadErrors)")
             }
         })
     }
