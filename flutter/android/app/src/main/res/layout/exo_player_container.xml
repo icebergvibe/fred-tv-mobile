@@ -14,4 +14,20 @@
         app:show_subtitle_button="true"
         app:auto_show="true"
         app:controller_layout_id="@layout/custom_player_control_view" />
+
+    <!-- Last load/playback error while the player is stuck buffering or
+         reconnecting; hidden as soon as playback is ready. -->
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginBottom="72dp"
+        android:background="@color/exo_black_opacity_60"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        android:visibility="gone" />
 </FrameLayout>

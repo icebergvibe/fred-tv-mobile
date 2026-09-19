@@ -16,14 +16,19 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.ParserException
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -33,7 +38,13 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
+import java.io.EOFException
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.Locale
+import javax.net.ssl.SSLException
 
 class ExoPlayerView(
     context: Context,
@@ -53,11 +64,13 @@ class ExoPlayerView(
     private val handler = Handler(Looper.getMainLooper())
     private val player: ExoPlayer
     private val playerView: PlayerView
+    private val statusText: TextView
     private val root: FrameLayout
 
     private var zoomed = false
     private var reconnecting = false
     private var reconnectAttempts = 0
+    private var loadErrors = 0
 
     companion object {
         var active: ExoPlayerView? = null
@@ -88,10 +101,12 @@ class ExoPlayerView(
             .inflate(R.layout.exo_player_container, null) as FrameLayout
         root.keepScreenOn = true
         playerView = root.findViewById(R.id.player_view)
+        statusText = root.findViewById(R.id.status_text)
         if (debug) player.addAnalyticsListener(EventLogger(DIAG_TAG))
         attachPlayer()
         bindControls()
         observeForReconnect()
+        observeForStatus()
         active = this
         startPlayback()
     }
@@ -168,17 +183,75 @@ class ExoPlayerView(
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (debug) Log.e(DIAG_TAG, "onPlayerError code=${error.errorCodeName} cause=${error.cause}", error)
+                val what = describe(error.cause ?: error)
+                showStatus(
+                    if (isLive) "$what (${error.errorCodeName}) — reconnecting…"
+                    else "$what (${error.errorCodeName})"
+                )
                 if (isLive) scheduleReconnect()
             }
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (debug) Log.i(DIAG_TAG, "onPlaybackStateChanged state=${stateName(state)}")
                 when (state) {
-                    Player.STATE_READY -> reconnectAttempts = 0
+                    Player.STATE_READY -> {
+                        reconnectAttempts = 0
+                        loadErrors = 0
+                        hideStatus()
+                    }
                     Player.STATE_ENDED -> if (isLive) scheduleReconnect()
                 }
             }
         })
+    }
+
+    /**
+     * Failed loads are retried internally by the load-error policy (up to 999
+     * times) without ever reaching onPlayerError, so the player just shows a
+     * spinner. Surface each failure so the user can see what the server said.
+     */
+    private fun observeForStatus() {
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onLoadError(
+                eventTime: AnalyticsListener.EventTime,
+                loadEventInfo: LoadEventInfo,
+                mediaLoadData: MediaLoadData,
+                error: IOException,
+                wasCanceled: Boolean,
+            ) {
+                if (wasCanceled) return
+                loadErrors++
+                showStatus("${describe(error)} — retrying ($loadErrors)")
+            }
+        })
+    }
+
+    private fun describe(error: Throwable): String {
+        var t: Throwable? = error
+        while (t != null) {
+            when (t) {
+                is HttpDataSource.InvalidResponseCodeException -> return "HTTP ${t.responseCode}"
+                is HttpDataSource.CleartextNotPermittedException -> return "Cleartext HTTP not permitted"
+                is UnknownHostException -> return "Unknown host"
+                is SocketTimeoutException -> return "Connection timed out"
+                is ConnectException -> return "Connection refused"
+                is SSLException -> return "TLS error"
+                is EOFException -> return "Connection closed by server"
+                is ParserException -> return "Unrecognised stream format"
+            }
+            t = t.cause
+        }
+        val message = error.message?.takeIf { it.isNotBlank() }
+        return if (message != null) "${error.javaClass.simpleName}: $message" else error.javaClass.simpleName
+    }
+
+    private fun showStatus(text: String) {
+        statusText.text = text
+        statusText.visibility = View.VISIBLE
+    }
+
+    private fun hideStatus() {
+        statusText.visibility = View.GONE
     }
 
     private fun stateName(state: Int): String = when (state) {
