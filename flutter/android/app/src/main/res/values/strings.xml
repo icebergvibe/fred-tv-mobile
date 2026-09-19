@@ -3,4 +3,5 @@
     <string name="exo_back">Back</string>
     <string name="exo_audio">Audio track</string>
     <string name="exo_zoom">Aspect ratio</string>
+    <string name="exo_cast">Cast</string>
 </resources>

@@ -46,6 +46,7 @@ class ExoPlayerView(
     private val url = params["url"] as String
     private val startPositionMs = (params["startPositionMs"] as? Number)?.toLong() ?: 0L
     private val title = params["title"] as? String ?: ""
+    private val showCast = params["showCast"] as? Boolean ?: false
     private val debug = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     private val methodChannel = MethodChannel(messenger, "dev.fredol.open_tv/exoplayer_$viewId")
@@ -145,6 +146,12 @@ class ExoPlayerView(
         }
         playerView.findViewById<View>(R.id.audio_button).setOnClickListener { showAudioTrackDialog() }
         playerView.findViewById<View>(R.id.zoom_button).setOnClickListener { toggleZoom() }
+        playerView.findViewById<View>(R.id.cast_button).apply {
+            visibility = if (showCast) View.VISIBLE else View.GONE
+            // Flutter tears this view down (releasing the player, and with it
+            // the single upstream connection) before it starts casting.
+            setOnClickListener { methodChannel.invokeMethod("onCast", player.currentPosition) }
+        }
     }
 
     private fun tolerantLoadControl(): LoadControl =
@@ -371,10 +378,12 @@ class ExoPlayerView(
     override fun getView(): View = root
 
     override fun dispose() {
-        if (active === this) active = null
         methodChannel.setMethodCallHandler(null)
         handler.removeCallbacksAndMessages(null)
         playerView.player = null
         player.release()
+        // Cleared only after release: CastManager waits on this before it
+        // opens the provider stream a second time.
+        if (active === this) active = null
     }
 }

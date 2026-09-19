@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_tv/cast/cast_button.dart';
+import 'package:open_tv/cast/cast_mini_controller.dart';
 import 'package:open_tv/native_bridge.dart';
 import 'package:open_tv/bottom_nav.dart';
 import 'package:open_tv/channel_tile.dart';
@@ -386,6 +388,7 @@ class _HomeState extends State<Home> {
                             suffixIcon: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                if (!widget.tvMode) const CastButton(),
                                 IconButton(
                                   focusNode: _keywordsFocusNode,
                                   onPressed: () {
@@ -440,11 +443,17 @@ class _HomeState extends State<Home> {
         ),
       ),
       bottomNavigationBar: !widget.tvMode
-          ? BottomNav(
-              startingView: getStartingView(),
-              blockSettings: blockSettings,
-              updateViewMode: updateViewMode,
-              tvMode: widget.tvMode,
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CastMiniController(),
+                BottomNav(
+                  startingView: getStartingView(),
+                  blockSettings: blockSettings,
+                  updateViewMode: updateViewMode,
+                  tvMode: widget.tvMode,
+                ),
+              ],
             )
           : null,
       floatingActionButton: !widget.tvMode

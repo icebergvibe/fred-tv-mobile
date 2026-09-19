@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:open_tv/cast/cast_bridge.dart';
+import 'package:open_tv/cast/cast_controls.dart';
+import 'package:open_tv/cast/cast_device_dialog.dart';
+import 'package:open_tv/cast/cast_mini_controller.dart';
 import 'package:open_tv/native_bridge.dart';
 import 'package:open_tv/bottom_nav.dart';
 import 'package:open_tv/confirm_delete.dart';
@@ -240,6 +244,55 @@ class _SettingsState extends State<SettingsView> {
     );
   }
 
+  Future<void> castTestStream() async {
+    final cast = CastBridge.instance;
+    if (!cast.isConnected && !await showCastDeviceDialog(context)) return;
+    await cast.castTestStream();
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CastControls()),
+    );
+  }
+
+  List<Widget> castSection() {
+    final cast = CastBridge.instance;
+    if (!cast.available || widget.tvMode) return const [];
+    return [
+      const Divider(),
+      const Padding(
+        padding: EdgeInsets.only(left: 10),
+        child: Text(
+          'Chromecast',
+          style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+        ),
+      ),
+      const SizedBox(height: 10),
+      ListenableBuilder(
+        listenable: cast,
+        builder: (context, _) => ListTile(
+          leading: Icon(cast.isConnected ? Icons.cast_connected : Icons.cast),
+          title: const Text("Cast device"),
+          subtitle: Text(
+            cast.isConnected
+                ? "Connected to ${cast.deviceName ?? "device"}"
+                : "Not connected",
+          ),
+          onTap: () => showCastDeviceDialog(context),
+        ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.play_circle_outline),
+        title: const Text("Cast a test video"),
+        subtitle: const Text(
+          "Plays a short sample on the device to check that casting works, "
+          "without using your IPTV connection",
+        ),
+        onTap: castTestStream,
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -387,6 +440,7 @@ class _SettingsState extends State<SettingsView> {
                       ],
                     ),
                   ),
+                  ...castSection(),
                   const Divider(),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -437,10 +491,16 @@ class _SettingsState extends State<SettingsView> {
         ),
       ),
       bottomNavigationBar: !widget.tvMode
-          ? BottomNav(
-              updateViewMode: updateView,
-              startingView: ViewType.settings,
-              tvMode: widget.tvMode,
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CastMiniController(),
+                BottomNav(
+                  updateViewMode: updateView,
+                  startingView: ViewType.settings,
+                  tvMode: widget.tvMode,
+                ),
+              ],
             )
           : null,
     );

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_tv/cast/cast_bridge.dart';
 import 'package:open_tv/generated/generated_proto.pb.dart' as gen;
 import 'package:open_tv/home.dart';
 import 'package:open_tv/models/custom_shortcut.dart';
@@ -42,12 +44,29 @@ Future<void> main() async {
   final settings = await nb.NativeBridge.instance.getSettings();
   final hasTouchScreen = await Utils.hasTouchScreen();
   final isTV = await DeviceDetector.isTV();
+  final isTvMode = MyApp.computeTvMode(settings, hasTouchScreen, isTV);
+  if (Platform.isAndroid && !isTvMode) {
+    // Casting is a phone/tablet feature; an Android TV is a receiver itself.
+    CastBridge.instance.onError = _showCastError;
+    unawaited(CastBridge.instance.init());
+  }
   runApp(
     MyApp(
       skipSetup: hasSources,
       settings: settings,
       hasTouchScreen: hasTouchScreen,
       isTV: isTV,
+    ),
+  );
+}
+
+void _showCastError(String message) {
+  final context = MyApp.navigatorKey.currentContext;
+  if (context == null) return;
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    SnackBar(
+      backgroundColor: Colors.red[700],
+      content: Text(message, style: const TextStyle(color: Colors.white)),
     ),
   );
 }
@@ -80,7 +99,9 @@ class MyApp extends StatelessWidget {
       Platform.isWindows ||
       Platform.isMacOS;
 
-  bool get _isTvMode =>
+  bool get _isTvMode => computeTvMode(settings, hasTouchScreen, isTV);
+
+  static bool computeTvMode(Settings settings, bool hasTouchScreen, bool isTV) =>
       settings.forceTVMode ||
       isTV ||
       (!hasTouchScreen && (Platform.isAndroid || Platform.isIOS));

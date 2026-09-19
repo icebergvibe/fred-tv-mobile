@@ -2,6 +2,10 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_tv/cast/cast_bridge.dart';
+import 'package:open_tv/cast/cast_controls.dart';
+import 'package:open_tv/cast/cast_device_dialog.dart';
+import 'package:open_tv/cast/cast_state.dart';
 import 'package:open_tv/memory.dart';
 import 'package:open_tv/models/channel.dart';
 import 'package:open_tv/error.dart';
@@ -229,16 +233,45 @@ class _ChannelTileState extends State<ChannelTile> {
       var settings = await NativeBridge.instance.getSettings();
       NativeBridge.instance.addLastWatched(widget.channel.id!);
       if (!mounted) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => Platform.isAndroid
-              ? ExoPlayerScreen(channel: widget.channel, settings: settings)
-              : Player(channel: widget.channel, settings: settings),
-        ),
-      );
+      if (CastBridge.instance.isConnected) {
+        // While a cast session is connected, playing means casting: never
+        // start the local player alongside it (one upstream viewer only).
+        await _cast();
+      } else {
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => Platform.isAndroid
+                ? ExoPlayerScreen(channel: widget.channel, settings: settings)
+                : Player(channel: widget.channel, settings: settings),
+          ),
+        );
+        if (result is CastHandoff && mounted) {
+          await _cast(startPositionMs: result.positionMs);
+        }
+      }
       if (mounted) _focusNode.requestFocus();
     }
+  }
+
+  Future<void> _cast({int startPositionMs = 0}) async {
+    final cast = CastBridge.instance;
+    if (!cast.isConnected) {
+      if (!await showCastDeviceDialog(context)) return;
+      if (!mounted) return;
+    }
+    if (startPositionMs == 0 && widget.channel.mediaType == MediaType.movie) {
+      final saved = (await Error.tryAsyncNoLoading(() async {
+        return await NativeBridge.instance.getMoviePosition(widget.channel.id!);
+      }, context)).data;
+      startPositionMs = (saved ?? 0) * 1000;
+    }
+    await cast.castChannel(widget.channel, startPositionMs: startPositionMs);
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CastControls()),
+    );
   }
 
   @override

@@ -5,6 +5,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:open_tv/cast/cast_bridge.dart';
+import 'package:open_tv/cast/cast_state.dart';
 import 'package:open_tv/error.dart';
 import 'package:open_tv/models/channel.dart';
 import 'package:open_tv/models/channel_http_headers.dart';
@@ -67,6 +69,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
         "referer": headers?.referrer,
         "origin": headers?.httpOrigin,
         "userAgent": headers?.userAgent,
+        "showCast": CastBridge.instance.available,
       };
       _ready = true;
     });
@@ -75,14 +78,19 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
   void _onPlatformViewCreated(int id) {
     _channel = MethodChannel("dev.fredol.open_tv/exoplayer_$id");
     _channel!.setMethodCallHandler((call) async {
-      if (call.method == "onBack") {
-        _onExit();
+      switch (call.method) {
+        case "onBack":
+          _onExit();
+        case "onCast":
+          // Leave the screen first: disposing the platform view releases the
+          // local player and its upstream connection; the caller then casts.
+          _onExit(castFromMs: (call.arguments as num?)?.toInt() ?? 0);
       }
       return null;
     });
   }
 
-  Future<void> _onExit() async {
+  Future<void> _onExit({int? castFromMs}) async {
     if (_exiting) return;
     _exiting = true;
     if (widget.channel.mediaType == MediaType.movie && _channel != null) {
@@ -95,7 +103,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
       } catch (_) {}
     }
     if (!mounted) return;
-    Navigator.of(context).pop();
+    Navigator.of(
+      context,
+    ).pop(castFromMs != null ? CastHandoff(castFromMs) : null);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,

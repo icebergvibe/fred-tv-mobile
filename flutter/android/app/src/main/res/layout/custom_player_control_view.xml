@@ -39,6 +39,18 @@
             android:maxLines="1"
             android:textColor="@android:color/white"
             android:textSize="18sp" />
+
+        <ImageButton
+            android:id="@+id/cast_button"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/exo_cast"
+            android:scaleType="fitCenter"
+            android:padding="10dp"
+            android:src="@drawable/ic_exo_cast"
+            android:tint="@android:color/white"
+            android:visibility="gone" />
     </LinearLayout>
 
     <FrameLayout
