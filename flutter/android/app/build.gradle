@@ -29,7 +29,17 @@ android {
         versionName = flutter.versionName
     }
 
+    packagingOptions {
+        jniLibs {
+            pickFirsts += ["**/libc++_shared.so"]
+        }
+    }
+
     buildTypes {
+        debug {
+            // Installs next to the Play Store build (different signing key).
+            applicationIdSuffix = ".dev"
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
@@ -50,4 +60,15 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-dash:$media3_version"
     implementation "androidx.media3:media3-datasource:$media3_version"
     implementation "androidx.media3:media3-ui:$media3_version"
+    // Google Cast sender (Chromecast). Uses the Cast SDK directly rather than
+    // media3-cast, which pulls in Jetpack Compose and hides live-stream flags.
+    implementation "com.google.android.gms:play-services-cast-framework:22.3.1"
+    implementation "androidx.mediarouter:mediarouter:1.8.1"
+    implementation "androidx.core:core-ktx:1.17.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+    // Cast pipeline: FFmpeg 8.1 (GPL build: x264 + MediaCodec + TLS) turns any
+    // IPTV stream into H.264/AAC HLS, served to the receiver by NanoHTTPD.
+    // Maintained fork of the retired ffmpeg-kit (com.arthenica), 16 KB aligned.
+    implementation "com.antonkarpenko:ffmpeg-kit-https-gpl:2.2.1"
+    implementation "org.nanohttpd:nanohttpd:2.3.1"
 }
