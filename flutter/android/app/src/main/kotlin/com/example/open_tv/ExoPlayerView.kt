@@ -83,6 +83,7 @@ class ExoPlayerView(
         const val BUFFER_RESUME_AFTER_REBUFFER_MS = 10_000
         const val HTTP_CONNECT_TIMEOUT_MS = 15_000
         const val HTTP_READ_TIMEOUT_MS = 60_000
+        const val STATUS_BODY_CHARS = 120
     }
 
     init {
@@ -230,7 +231,7 @@ class ExoPlayerView(
         var t: Throwable? = error
         while (t != null) {
             when (t) {
-                is HttpDataSource.InvalidResponseCodeException -> return "HTTP ${t.responseCode}"
+                is HttpDataSource.InvalidResponseCodeException -> return describeHttp(t)
                 is HttpDataSource.CleartextNotPermittedException -> return "Cleartext HTTP not permitted"
                 is UnknownHostException -> return "Unknown host"
                 is SocketTimeoutException -> return "Connection timed out"
@@ -243,6 +244,27 @@ class ExoPlayerView(
         }
         val message = error.message?.takeIf { it.isNotBlank() }
         return if (message != null) "${error.javaClass.simpleName}: $message" else error.javaClass.simpleName
+    }
+
+    /**
+     * A refusal may come from something other than the provider (captive
+     * portal, DNS filter block page, carrier filter); the Server header and
+     * the start of the body usually say which.
+     */
+    private fun describeHttp(e: HttpDataSource.InvalidResponseCodeException): String {
+        val server = e.headerFields.entries
+            .firstOrNull { it.key.equals("Server", ignoreCase = true) }
+            ?.value?.firstOrNull()
+        val body = String(e.responseBody, Charsets.UTF_8)
+            .replace(Regex("<[^>]*>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(STATUS_BODY_CHARS)
+        return buildString {
+            append("HTTP ").append(e.responseCode)
+            if (server != null) append(" (server: ").append(server).append(')')
+            if (body.isNotEmpty()) append(": ").append(body)
+        }
     }
 
     private fun showStatus(text: String) {
